@@ -1,0 +1,216 @@
+<html>
+  <head>
+     <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: black;
+        }
+
+        #videoElement {
+            width: 80%;
+            height: auto;
+            background-color: #000;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+
+        .button {
+            position: fixed;
+            padding: 10px 20px;
+            font-size: 16px;
+            color: black;
+            background-color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #vision_button {
+            top: 20px;
+            left: 20px;
+        }
+
+        #detect_faces {
+            top: 20px;
+            left: 140px;
+        }
+
+.button:hover {
+    background-color: gray;
+}
+
+.results {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    padding: 20px;
+    background-color: white;
+    color: black;
+    border-radius: 8px;
+    width: 300px;
+    max-height: 50%;
+    overflow-y: auto;
+}
+
+.results div {
+    margin-bottom: 10px;
+}
+
+.results span {
+    display: block;
+}
+</style>
+</head>
+<body>
+<!-- Basic Cloud Vision (Google) Demo -->
+<video autoplay="true" id="videoElement"></video>
+<button id="vision_button" class="button">Analyze</button>
+<button id="detect_faces" class="button">Detect Faces</button>
+<div id='results' class='results'></div>
+<script>
+
+// Access camera
+var video = document.querySelector("#videoElement");
+if (navigator.mediaDevices.getUserMedia) {
+  navigator.mediaDevices.getUserMedia({video: true})
+  .then(function(stream) {
+                  video.srcObject = stream;
+              })
+              .catch(function(err) {
+                  console.log("Something went wrong!");
+              });
+  }
+
+      // We only get to work when the vision button is clicked
+      document.querySelector("#vision_button").addEventListener('click', evt => {
+          // extract image as base64, scale it down to reduce data transfer speed
+          var scale = 0.25;
+          var canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth * scale;
+          canvas.height = video.videoHeight * scale;
+          canvas.getContext('2d')
+              .drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          // dataUrl contains base64 version of image
+          var dataUrl = canvas.toDataURL();
+
+          // Send image to google to analyze
+          // Documentation of the annotate feature: https://cloud.google.com/vision/docs/reference/rest/v1/images/annotate
+          fetch('https://vision.googleapis.com/v1/images:annotate?key=AIzaSyBP1NZMvsXzR8VWyVwBkbRK7nVd3k9HkdM', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                  requests: [
+                      {
+                          features: {
+                              type: 'LABEL_DETECTION'
+                          },
+                          image: {
+                              // have to extract only the image data from dataURL
+                              content: dataUrl.substring('data:image/png;base64,'.length)
+                          }
+                      }
+                  ]
+                })
+          }).then( resp => {
+              return resp.json();
+          }).then( json => {
+ // Simply output the response
+              console.log(json);
+              results.innerHTML = '';
+              json.responses[0].labelAnnotations.forEach( annotation => {
+                  let description = document.createElement('span');
+                  let score = document.createElement('span');
+
+                  let div = document.createElement('div');
+                  description.innerText = annotation.description;
+                  score.innerText = annotation.score;
+
+                  div.append(description,score);
+
+                  results.append(div);
+              });
+          });
+      });
+document.getElementById('detect_faces').addEventListener('click', function() {
+    detectFaces();
+});
+
+function detectFaces() {
+    let video = document.getElementById('videoElement');
+    let canvas = document.createElement('canvas');
+    let context = canvas.getContext('2d');
+
+    // Set canvas size equal to video size
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    // Draw the video frame to the canvas
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Convert canvas image to a format that can be sent to the Vision API
+   let imageDataURL = canvas.toDataURL('image/png');
+    let imageContent = imageDataURL.replace('data:image/png;base64,', '');
+    fetch('https://vision.googleapis.com/v1/images:annotate?key=AIzaSyBP1NZMvsXzR8VWyVwBkbRK7nVd3k9HkdM', {
+        method: 'POST',
+        body: JSON.stringify({
+            "requests": [
+                {
+                    "image": { "content": imageContent },
+                    "features": [ { "type": "FACE_DETECTION" } ]
+                }
+            ]
+        }),
+        headers: { "Content-Type": "application/json" }
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log(data); // Log the full response
+        displayFaceEmotions(data);
+    })
+    .catch(error => {
+        console.error('Error:', error);
+    });
+}
+
+function displayFaceEmotions(data) {
+
+    let resultsDiv = document.getElementById('results');
+
+    // Clear previous content
+    resultsDiv.innerHTML = '';
+
+    // Check if there are any faces detected and annotations exist
+    if (data.responses[0].faceAnnotations) {
+        let faces = data.responses[0].faceAnnotations;
+
+        faces.forEach((face, index) => {
+            // Create a div for each face's emotions data
+            let faceDataDiv = document.createElement('div');
+            faceDataDiv.innerHTML = `
+                <h3>Face ${index + 1}</h3>
+                <p>Anger: ${face.angerLikelihood}</p>
+                <p>Joy: ${face.joyLikelihood}</p>
+                <p>Surprise: ${face.surpriseLikelihood}</p>
+                <p>Blurred: ${face.blurredLikelihood}</p>
+                <p>Headwear: ${face.headwearLikelihood}</p>
+            `;
+            // Append the div with the face's emotions data to the results div
+            resultsDiv.appendChild(faceDataDiv);
+        });
+    } else {
+        // If no faces are detected, display a message
+        resultsDiv.innerHTML = '<p>No faces detected.</p>';
+    }
+}
+
+ </script>
+  </body>
+</html>
